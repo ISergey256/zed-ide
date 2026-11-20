@@ -15,6 +15,7 @@ pub mod path_list {
 }
 pub mod path_link;
 mod persistence;
+pub mod project_file;
 pub mod searchable;
 pub mod security_modal;
 pub mod shared_screen;
@@ -405,6 +406,8 @@ actions!(
         ActivatePreviousWindow,
         /// Adds a folder to the current project.
         AddFolderToProject,
+        /// Saves the current project's folders to a `.zed-project` file that can be opened later.
+        SaveProjectAs,
         /// Clears all bookmarks in the project.
         ClearBookmarks,
         /// Clears all notifications.
@@ -971,6 +974,16 @@ pub fn prompt_for_open_path_and_open(
         }) = paths.await.log_err().flatten()
         else {
             return;
+        };
+        let paths = match project_file::expand_project_files(paths, app_state.fs.as_ref()).await
+        {
+            Ok(paths) => paths,
+            Err(error) => {
+                workspace
+                    .update(cx, |workspace, cx| workspace.show_error(error, cx))
+                    .ok();
+                return;
+            }
         };
         if !open_in_new_window {
             let is_local = workspace
@@ -4501,6 +4514,66 @@ impl Workspace {
                 for result in results.into_iter().flatten() {
                     result.log_err();
                 }
+            }
+            anyhow::Ok(())
+        })
+        .detach_and_log_err(cx);
+    }
+
+    pub fn save_project_as(
+        &mut self,
+        _: &SaveProjectAs,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let project = self.project.read(cx);
+        if !project.is_local() {
+            self.show_error("Only local projects can be saved to a project file", cx);
+            return;
+        }
+        let folders: Vec<PathBuf> = project
+            .visible_worktrees(cx)
+            .map(|worktree| worktree.read(cx).abs_path().to_path_buf())
+            .collect();
+        if folders.is_empty() {
+            self.show_error("Add a folder to the project before saving it", cx);
+            return;
+        }
+        let suggested_name = folders
+            .first()
+            .and_then(|folder| folder.file_name())
+            .map(|name| {
+                format!(
+                    "{}.{}",
+                    name.to_string_lossy(),
+                    project_file::PROJECT_FILE_EXTENSION
+                )
+            });
+        let fs = self.app_state.fs.clone();
+        let path = self.prompt_for_new_path(
+            DirectoryLister::Project(self.project.clone()),
+            suggested_name,
+            window,
+            cx,
+        );
+        cx.spawn_in(window, async move |this, cx| {
+            let Some(mut path) = path.await?.and_then(|paths| paths.into_iter().next()) else {
+                return anyhow::Ok(());
+            };
+            if !project_file::is_project_file(&path) {
+                path.set_extension(project_file::PROJECT_FILE_EXTENSION);
+            }
+            let project_file_directory = path.parent().unwrap_or(Path::new(""));
+            let contents =
+                project_file::ProjectFile::from_folders(&folders, project_file_directory)
+                    .to_json()?;
+            if let Err(error) = fs.atomic_write(path.clone(), contents).await {
+                this.update(cx, |this, cx| {
+                    this.show_error(
+                        format!("Failed to save project file {}: {error}", path.display()),
+                        cx,
+                    )
+                })?;
             }
             anyhow::Ok(())
         })
@@ -8528,6 +8601,7 @@ impl Workspace {
             .on_action(cx.listener(Self::save_all))
             .on_action(cx.listener(Self::send_keystrokes))
             .on_action(cx.listener(Self::add_folder_to_project))
+            .on_action(cx.listener(Self::save_project_as))
             .on_action(cx.listener(Self::follow_next_collaborator))
             .on_action(cx.listener(Self::activate_pane_at_index))
             .on_action(cx.listener(Self::move_item_to_pane_at_index))
@@ -11872,6 +11946,8 @@ pub fn open_paths(
     let abs_paths = abs_paths.to_vec();
 
     cx.spawn(async move |cx| {
+        let abs_paths =
+            project_file::expand_project_files(abs_paths, app_state.fs.as_ref()).await?;
         let mut reuse_target =
             find_existing_workspace(&abs_paths, &open_options, &ProjectHost::Local, cx);
 

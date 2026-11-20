@@ -1252,6 +1252,14 @@ Root: HKCU; Subkey: "Software\Classes\Drive\shell\{#RegValueName}"; ValueType: e
 Root: HKCU; Subkey: "Software\Classes\Drive\shell\{#RegValueName}"; ValueType: expandsz; ValueName: "Icon"; ValueData: "{app}\{#AppExeName}.exe"; Tasks: addcontextmenufolders; Check: not IsWindows11OrLater
 Root: HKCU; Subkey: "Software\Classes\Drive\shell\{#RegValueName}\command"; ValueType: expandsz; ValueName: ""; ValueData: """{app}\{#AppExeName}.exe"" ""%V"""; Tasks: addcontextmenufolders; Check: not IsWindows11OrLater
 
+; Zed project files are owned by Zed, so register it as the default handler rather than only under OpenWithProgids.
+Root: HKCU; Subkey: "Software\Classes\.zed-project"; ValueType: string; ValueName: ""; ValueData: "{#RegValueName}.zed-project"; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Classes\.zed-project\OpenWithProgids"; ValueType: string; ValueName: "{#RegValueName}.zed-project"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Classes\{#RegValueName}.zed-project"; ValueType: string; ValueName: ""; ValueData: "Zed Project"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\{#RegValueName}.zed-project"; ValueType: string; ValueName: "AppUserModelID"; ValueData: "{#AppUserId}"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\{#RegValueName}.zed-project\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExeName}.exe"",0"
+Root: HKCU; Subkey: "Software\Classes\{#RegValueName}.zed-project\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExeName}.exe"" ""%1"""
+
 ; Environment
 Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; ValueData: "{code:AddToPath|{app}\bin}"; Tasks: addtopath; Check: NeedsAddToPath(ExpandConstant('{app}\bin'))
 
